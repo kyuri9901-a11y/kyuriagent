@@ -144,7 +144,6 @@
     .input-box:focus-within { border-color: var(--green3); }
     .input-label { font-size: 10px; color: var(--green5); padding: 8px 12px 4px; }
     
-    /* ⭐ 아래 placeholder 부분도 완전히 SK하이닉스로 교체했습니다! */
     textarea { width: 100%; background: transparent; color: var(--text); font-family: inherit; font-size: 13px; padding: 4px 12px 10px; border: none; outline: none; resize: none; }
     textarea::placeholder { color: #2a4a2a; }
     
@@ -197,14 +196,43 @@
 </footer>
 
 <script>
-const SYSTEM_PROMPT = `당신은 한국공인회계사(KICPA) 자격을 갖춘 정교한 재무분석 에이전트입니다.
-반드시 제공된 googleSearch 툴을 활용하여 해당 기업의 최신 DART 공시, 요약재무제표, 재무비율(안정성, 수익성, 성장성, 활동성)을 수집하고 리포트를 작성하세요.
-답변할 때 수치 데이터는 가급적 표(| 항목 | 연도 | 수치 |) 형태로 깔끔하게 작성해야 사용자가 엑셀 등으로 파싱하기 좋습니다.`;
+// ⭐ [PART 1 ~ PART 10] 규칙을 완벽하게 주입한 시스템 프롬프트 백엔드 모듈
+const SYSTEM_PROMPT = `
+## PART 0. 에이전트 동작 원칙 (최우선)
+1. 자율 진행 기본값: 사용자가 대기 신호를 주지 않아도 PART 6의 6단계를 한 턴 내에서 가능한 만큼 자율적으로 연속 진행 후 중간/최종 보고를 생성하십시오.
+2. 질문 제약: 분석 대상 기업이 특정되지 않은 경우에만 최초 1회 기업명을 질문하십시오. 기간 미지정 시 '직전 확정 3개 사업연도(기본값)'로 자동 간주해 진행하고, 연결/별도 모호 시 '연결재무제표 기준'으로 1회 고지 후 즉시 분석하십시오. 승인을 구하며 중단하지 마십시오.
+3. 중단 조건: 사업보고서 원천 차단되거나 핵심 수치가 전체 결측된 경우에만 중단하십시오.
+4. 진행 보고: 데이터 수집 및 정규화 완료 시점에 1~2문장으로 요약 보고 라인을 넣고 다음 단계 산출물로 넘어가십시오.
+
+## PART 1. 페르소나
+- 당신은 한국공인회계사(KICPA) 자격을 갖춘 Big4 출신 재무자문專家입니다. 숫자 뒤의 업황 구조와 리스크 흐름을 읽어내어 경영진 앞 의사결정 보고용 "So what"(의미하는 바)과 "Watch-list"를 정량적으로 제시하십시오. Fact와 Interpretation을 완벽히 분리하고, 모든 핵심 결론 뒤에 확실성 등급(①확정 ②해석 ③추정)을 명시하십시오.
+
+## PART 3 & PART 4. 데이터 검증 및 분석 프레임워크 (5대 축 + 알파)
+1. 정규화(Normalize) 필수: 일회성 손익(자산손상, 일회성 충당금, 외환 일시 손익 등)을 반드시 식별하여 "조정 영업이익"을 도출하십시오. 일회성을 정규화하지 않은 급변동 단정을 절대 금지합니다.
+2. 수치 데이터는 가급적 마크다운 표(| 항목 | 연도 | 수치 |) 형태로 작성하여 엑셀 파싱이 가능하게 하십시오. 금액 단위(억원/백만원 등)를 상단에 명시하고 footing 무결성을 검증하십시오.
+
+## PART 7 & PART 8. 보고용 산출물 양식 요건 (★반드시 아래 포맷 순서 엄수★)
+답변은 반드시 다음 구조의 마크다운 포맷으로만 출력해야 합니다:
+
+[1] Executive Summary
+- 분석기간 한 줄 요약, 핵심 수치 3~4개 요약, 가장 중요한 시사점, Watch-list 3가지
+[2] N개년 손익 분석 (동인 분해 포함)
+- 매출, 원가율, 영업이익률 추이 및 일회성 손익 제거 정규화 내역. 물량x가격x믹스 분석.
+[3] 재무상태 분석 (투자·운전자본·차입금)
+- 핵심 자산 변동, 운전자본 회전일수, 부채비율 및 차입금 만기구조 분석.
+[4] 현금흐름 분석 (영업CF·FCF)
+- 영업CF와 CapEx 관계 및 잉여현금흐름(FCF) 추이.
+[5] 핵심 비율 시계열 (수익성/안정성/활동성/성장성)
+- 표 형태의 다년도 비율 제시 및 각 지표의 인과관계 해석 한 줄 포함.
+[6] 업황·산업 맥락 해석 (사이클성 업종 국면 라벨링)
+[7] Watch-list & 액션 시사점
+- 다음 점검 시점의 대응 포인트 제언.
+[부록] 정규화 내역 / 데이터 출처 / 가정
+`;
 
 let history = [];
 let isLoading = false;
 
-// ⭐ 첫 대화방 생성 시 기본 메시지 예시 고정
 const INITIAL_MSG = `안녕하십니까. **국내 상장사 N개년 재무분석 에이전트**입니다.
 
 분석을 시작하려면 **기업명(또는 종목코드)** 을 알려주십시오.
@@ -271,7 +299,7 @@ function appendMessage(role, content) {
     row.innerHTML = `
       <div class="avatar">AI</div>
       <div class="bubble-ai">
-        <div class="bubble-label">◆ ANALYSIS OUTPUT — CONFIDENTIAL</div>
+        <div class="bubble-label">◆ ANALYSIS OUTPUT — KICPA PROFESSIONAL PROFILE</div>
         <div class="md-content">${renderMarkdown(content)}</div>
       </div>`;
     area.appendChild(row);
@@ -293,10 +321,10 @@ function showLoading() {
   el.innerHTML = `
     <div class="avatar">AI</div>
     <div class="loading-box">
-      <div class="loading-label">◆ PROCESSING — DART SEARCH IN PROGRESS</div>
+      <div class="loading-label">◆ PROCESSING — KICPA FRAMEWORK PIPELINE RUNNING</div>
       <div class="loading-bars">
         <div class="bars"><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
-        <span class="loading-text">DART 공시 데이터 검색 및 금융 분석 서칭 중...</span>
+        <span class="loading-text">DART 원천데이터 확보 및 회계정규화·동인 파싱 시퀀스 실행 중...</span>
       </div>
     </div>`;
   area.appendChild(el);
@@ -334,7 +362,7 @@ async function sendMessage() {
     appendMessage("assistant", reply);
   } catch (err) {
     hideLoading();
-    appendMessage("assistant", `⚠️ 오류 발생: ${err.message}`);
+    appendMessage("assistant", `⚠️ 분석 오류 발생: ${err.message}`);
   } finally {
     isLoading = false; document.getElementById("sendBtn").disabled = false; input.focus();
   }
@@ -350,10 +378,10 @@ function exportPDF() {
 
   const element = document.createElement('div');
   element.className = 'export-pdf-area';
-  element.innerHTML = `<h1 style="font-size:20px; border-bottom:2px solid #222; padding-bottom:8px; margin-bottom:20px;">재무분석 보고서</h1>${htmlContent}`;
+  element.innerHTML = `<h1 style="font-size:20px; border-bottom:2px solid #222; padding-bottom:8px; margin-bottom:20px;">[CONFIDENTIAL] 상장사 N개년 재무분석 리포트</h1>${htmlContent}`;
 
   const opt = {
-    margin: 15, filename: '재무분석_리포트.pdf', image: { type: 'jpeg', quality: 0.98 },
+    margin: 15, filename: '재무분석_KICPA_리포트.pdf', image: { type: 'jpeg', quality: 0.98 },
     html2canvas: { scale: 2, backgroundColor: '#ffffff' }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
   };
   html2pdf().set(opt).from(element).save();
@@ -367,7 +395,7 @@ function exportWord() {
   const blob = new Blob([`\ufeff${textContent}`], { type: 'application/msword;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = '재무분석_리포트.doc';
+  a.href = url; a.download = '재무분석_KICPA_리포트.doc';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
@@ -379,7 +407,7 @@ function exportExcel() {
   const tables = lastBubble.querySelectorAll('table');
   
   if (!tables.length) {
-    return alert("리포트 내부에 엑셀로 변환할 표(Table) 데이터가 보이지 않습니다. 일반 텍스트 형태로 다운로드하려면 WORD를 활용해 주세요.");
+    return alert("리포트 내부에 엑셀로 변환할 표(Table) 데이터가 보이지 않습니다.");
   }
 
   const wb = XLSX.utils.book_new();
@@ -388,7 +416,7 @@ function exportExcel() {
     XLSX.utils.book_append_sheet(wb, ws, `재무데이터_표_${index + 1}`);
   });
 
-  XLSX.writeFile(wb, '재무분석_데이터셋.xlsx');
+  XLSX.writeFile(wb, '재무분석_정규화데이터셋.xlsx');
 }
 
 appendMessage("assistant", INITIAL_MSG);
